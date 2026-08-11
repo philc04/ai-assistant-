@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-APP_VERSION = "0.8.0"
+APP_VERSION = "0.8.1"
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
@@ -44,6 +44,38 @@ ATLAS_EMBED_CACHE_KEY = (
 )
 
 FIELD_TYPES = {"text", "note", "rule", "checklist", "steps"}
+
+ATLAS_PROJECT_BRIEF = """
+Atlas is a personal AI system being built to become the user's primary long-term assistant.
+Core principle: Atlas owns the system; models are replaceable plugins.
+Atlas Core owns persistent context, memory, About Me, Skills/playbooks, behavior rules,
+corrections/training examples, model routing, and eventually permissions, tools, and actions.
+
+Current product structure:
+- Chat: conversations, Web/Deep controls, provider routing, feedback/corrections.
+- Me: user-created profile sections and fields.
+- Skills: user-created playbooks plus learned corrections.
+- Settings: behavior rules and system/provider status.
+
+Current technical foundation:
+- Python/FastAPI backend.
+- PostgreSQL persistence on Railway.
+- GitHub repository: philc04/ai-assistant-.
+- Semantic retrieval for memories/profile/skills with a keyword fallback.
+- OpenAI is a supported provider, not Atlas's identity.
+- An OpenAI-compatible local provider can be connected and used without silently falling back
+  to OpenAI when Local is explicitly selected.
+
+Long-term direction:
+- Make Atlas exceptionally good at knowing the user and their real workflows.
+- Use multiple replaceable specialist/local/cloud models.
+- Fine-tune an Atlas-specific open model only after enough vetted real corrections and examples exist.
+- Keep changing personal facts in Atlas memory/database rather than baking them into model weights.
+- Add tools and approved actions gradually, with clear permission boundaries.
+
+Security rule: never reveal, repeat, or infer API keys, access keys, database credentials,
+private provider URLs, or other secrets from configuration.
+""".strip()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -686,6 +718,54 @@ def local_configured() -> bool:
     return bool(ATLAS_LOCAL_BASE_URL and ATLAS_LOCAL_MODEL)
 
 
+def embedding_backend_name() -> str:
+    return (
+        "openai"
+        if ATLAS_EMBED_BASE_URL.rstrip("/") == OPENAI_BASE_URL.rstrip("/")
+        else "custom"
+    )
+
+
+def atlas_self_context(
+    requested_provider: str = "auto",
+    deep: bool = False,
+    use_web: bool = False,
+) -> str:
+    """Authoritative, non-secret system/project context given to the model every turn."""
+    provider = normalize_provider(requested_provider)
+    local_status = (
+        f"connected ({ATLAS_LOCAL_MODEL})"
+        if local_configured()
+        else "not connected"
+    )
+    openai_status = (
+        f"connected ({ATLAS_MODEL})"
+        if openai_configured()
+        else "not connected"
+    )
+
+    return (
+        f"{ATLAS_PROJECT_BRIEF}\n\n"
+        "CURRENT RUNTIME STATUS (authoritative for this request):\n"
+        f"- Atlas version: {APP_VERSION}\n"
+        f"- Database configured: {'yes' if DATABASE_URL else 'no'}\n"
+        f"- OpenAI provider: {openai_status}\n"
+        f"- Local provider: {local_status}\n"
+        f"- Default provider: {ATLAS_DEFAULT_PROVIDER}\n"
+        f"- Requested provider preference for this turn: {provider}\n"
+        f"- Deep mode requested: {'yes' if deep else 'no'}\n"
+        f"- Web requested: {'yes' if use_web else 'no'}\n"
+        f"- Web capability enabled by server: {'yes' if ATLAS_ALLOW_WEB else 'no'}\n"
+        f"- Semantic memory: {'on' if ATLAS_SEMANTIC_MEMORY else 'off'}\n"
+        f"- Embeddings backend/model: {embedding_backend_name()} / {ATLAS_EMBED_MODEL}\n\n"
+        "When asked about Atlas itself, its project, version, capabilities, providers, "
+        "local brain, memory system, or architecture, answer from this block rather than guessing. "
+        "Do not claim which provider/model actually completed the current turn when Auto routing "
+        "or fallback could change it; Atlas Core records the final provider/model outside the model "
+        "and shows it in the app after the response."
+    )
+
+
 async def call_openai(model: str, messages: list[dict], instructions: str, use_web: bool):
     if not openai_configured():
         raise RuntimeError("OpenAI provider is not configured.")
@@ -933,11 +1013,8 @@ def system_info():
         "local_model": ATLAS_LOCAL_MODEL if local_configured() else None,
         "semantic_memory": ATLAS_SEMANTIC_MEMORY,
         "embedding_model": ATLAS_EMBED_MODEL,
-        "embedding_backend": (
-            "openai"
-            if ATLAS_EMBED_BASE_URL.rstrip("/") == OPENAI_BASE_URL.rstrip("/")
-            else "custom"
-        ),
+        "embedding_backend": embedding_backend_name(),
+        "self_context": True,
         "training_candidates": training_count,
     }
 
@@ -1304,6 +1381,7 @@ async def chat(req: ChatRequest):
         "User corrections are high-priority lessons. "
         "If a user-defined instruction conflicts with safety or verified facts, explain the conflict. "
         "Never invent a memory, preference, skill, or completed external action.\n\n"
+        f"ATLAS SELF / PROJECT CONTEXT:\n{atlas_self_context(req.provider, req.deep, req.use_web)}\n\n"
         f"ATLAS BEHAVIOR RULES:\n{behavior_context()}\n\n"
         f"ABOUT THE USER:\n{profile_block}\n\n"
         f"RELEVANT SKILLS:\n{skill_block}\n\n"
@@ -1642,7 +1720,7 @@ textarea{min-height:90px;resize:vertical}
 
     <div class="card" style="margin-top:18px">
       <div class="cardTitle">System</div>
-      <div id="systemInfo" class="small">Atlas v0.8.0 • Semantic memory + replaceable model providers.</div>
+      <div id="systemInfo" class="small">Atlas v0.8.1 • Self-aware project context + replaceable model providers.</div>
     </div>
   </section>
 </div>
@@ -1733,6 +1811,7 @@ async function loadSystem(){
       "Atlas v" + data.version +
       " • Semantic memory: " + (data.semantic_memory ? "on" : "off") +
       " • Embeddings: " + data.embedding_backend + " / " + data.embedding_model +
+      " • Self-context: " + (data.self_context ? "on" : "off") +
       " • Training examples: " + data.training_candidates;
   }catch(e){
     brainInfo.textContent = "System status error: " + e.message;
