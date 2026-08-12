@@ -986,7 +986,29 @@ async def call_openai(model: str, messages: list[dict], instructions: str, use_w
     if not answer:
         raise RuntimeError("OpenAI returned no text output.")
     return answer, normalize_openai_usage(data)
+def normalize_local_messages(messages: list[dict]) -> list[dict]:
+    cleaned = []
 
+    for message in messages:
+        role = message.get("role")
+        content = (message.get("content") or "").strip()
+
+        if role not in {"user", "assistant"} or not content:
+            continue
+
+        current = {"role": role, "content": content}
+
+        if not cleaned:
+            if role == "user":
+                cleaned.append(current)
+            continue
+
+        if cleaned[-1]["role"] == role:
+            cleaned[-1] = current
+        else:
+            cleaned.append(current)
+
+    return cleaned
 
 async def call_local(model: str, messages: list[dict], instructions: str):
     if not local_configured():
@@ -996,7 +1018,7 @@ async def call_local(model: str, messages: list[dict], instructions: str):
         headers["Authorization"] = f"Bearer {ATLAS_LOCAL_API_KEY}"
     payload = {
         "model": model,
-        "messages": [{"role": "system", "content": instructions}] + messages,
+        "messages": [{"role": "system", "content": instructions}] + normalize_local_messages(messages),
         "stream": False,
     }
     async with httpx.AsyncClient(timeout=180) as client:
