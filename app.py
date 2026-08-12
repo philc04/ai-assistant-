@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-APP_VERSION = "0.9.0-alpha"
+APP_VERSION = "0.9.1-alpha"
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
@@ -2042,7 +2042,7 @@ def home():
     <div class="card" style="margin-top:18px"><div class="cardTitle">System</div><div id="systemInfo" class="small">Atlas v0.9.0-alpha</div></div>
   </section>
 
-  <section id="page-admin" class="page adminOnly">
+  <section id="page-admin" class="page">
     <div class="spread"><div><div class="cardTitle">Admin</div><div class="small">Usage and diagnostics. Conversation text is not shown here.</div></div><button onclick="createTester()">+ Tester</button></div>
     <div id="adminSummary"></div>
     <div id="adminUsers"></div>
@@ -2066,7 +2066,7 @@ function authHeaders(json=true){let h={"X-Atlas-Key":key};if(json)h["Content-Typ
 async function api(url,options={}){options.headers=options.headers||authHeaders(options.method&&options.method!=="GET");let r=await fetch(url,options);let data={};try{data=await r.json()}catch(_e){}if(!r.ok)throw new Error(data.detail||"Request failed");return data}
 function toggleAccess(){accessCard.style.display=accessCard.style.display==="block"?"none":"block"}
 async function saveAccess(){key=accessKey.value.trim();localStorage.setItem("atlas_key",key);cid=null;activeSkill=null;localStorage.removeItem("atlas_cid");localStorage.removeItem("atlas_active_skill");updateSkillChip();try{await loadSession();accessCard.style.display="none";chatMessages.innerHTML="";accessStatus.textContent="";chatStatus.textContent="Account switched."}catch(e){accessStatus.textContent=e.message;accessCard.style.display="block"}}
-async function loadSession(){if(!key){accessCard.style.display="block";return}session=await api("/api/session",{headers:authHeaders(false)});sessionLabel.textContent=session.name+(session.is_admin?" • Admin":"")+" • "+session.workspace_id;document.querySelectorAll(".adminOnly").forEach(x=>x.style.display=session.is_admin?"":"none");return session}
+async function loadSession(){if(!key){accessCard.style.display="block";return}session=await api("/api/session",{headers:authHeaders(false)});sessionLabel.textContent=session.name+(session.is_admin?" • Admin":"")+" • "+session.workspace_id;document.querySelectorAll(".adminOnly").forEach(x=>x.style.display=session.is_admin?"block":"none");return session}
 function saveBrainChoice(){brainChoice=brainSelect.value;localStorage.setItem("atlas_brain",brainChoice);brainInfo.textContent="Brain preference saved on this device."}
 async function loadSystem(){if(!key){toggleAccess();return}try{let data=await api("/api/system",{headers:authHeaders(false)});localBrainOption.disabled=!data.local_configured;if(brainChoice==="local"&&!data.local_configured){brainChoice="auto";brainSelect.value="auto";localStorage.setItem("atlas_brain","auto")}let providers=[];if(data.openai_configured)providers.push("OpenAI ready");if(data.local_configured)providers.push("Local ready: "+data.local_model);else providers.push("Local not connected yet");brainInfo.textContent=providers.join(" • ");systemInfo.textContent="Atlas v"+data.version+" • Workspace: "+data.workspace_name+" • Semantic memory: "+(data.semantic_memory?"on":"off")+" • Embeddings: "+data.embedding_backend+" / "+data.embedding_model+" • Training examples: "+data.training_candidates;let u=await api("/api/usage",{headers:authHeaders(false)});let budget=u.budget_usd<=0?"Unlimited":("$"+u.budget_usd.toFixed(2));let rem=u.remaining_usd===null?"Unlimited":("$"+u.remaining_usd.toFixed(2));usageInfo.textContent="$"+u.estimated_cost_usd.toFixed(4)+" estimated • "+u.requests+" requests • "+u.total_tokens.toLocaleString()+" tokens • Budget "+budget+" • Remaining "+rem}catch(e){brainInfo.textContent="System status error: "+e.message}}
 function showPage(name){if(name==="admin"&&(!session||!session.is_admin))return;document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));document.getElementById("page-"+name).classList.add("active");document.querySelectorAll(".nav button").forEach(x=>x.classList.toggle("active",x.dataset.page===name));if(name==="me")loadProfile();if(name==="skills")loadSkills();if(name==="settings"){loadBehavior();loadSystem()}if(name==="admin")loadAdmin()}
